@@ -83,8 +83,12 @@ pub fn lagrange_evaluations<F: FftField>(z: F, domain: Radix2EvaluationDomain<F>
 
 
 use ark_ff::{Field, PrimeField, Zero};
-use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ec::{AffineCurve, ProjectiveCurve, SWModelParameters};
 use crate::Bitmask;
+use ark_std::ops::{Mul, Add};
+use ark_std::iter::Sum;
+use ark_bls12_377::Fr;
+use ark_ec::models::short_weierstrass_jacobian::GroupProjective;
 
 pub fn mul_then_add<G: AffineCurve>(
     bases: &[G],
@@ -107,6 +111,33 @@ pub fn horner_field<F: Field>(
     bases.iter().rev().fold(F::zero(), |acc, b| nu * acc + b)
 }
 
+pub fn hornier_field<F: Field>(
+    bases: Vec<F>,
+    nu: F,
+) -> F {
+    hornier(&nu, bases)
+}
+
+// impl<'b, P: SWModelParameters> Mul<&'b P::ScalarField> for GroupProjective<P> {
+//     type Output = GroupProjective<P>;
+//
+//     fn mul(self, rhs: &'b P::ScalarField) -> Self::Output {
+//         unimplemented!()
+//     }
+// }
+
+pub fn hornier<C, B, BI>(
+    coeff: &C,
+    bases: BI,
+) -> B
+    where
+        BI: IntoIterator<Item=B>,
+        <BI as IntoIterator>::IntoIter: DoubleEndedIterator,
+        B: Add<B, Output=B> + for<'b> Mul<&'b C, Output=B> + Zero,
+{
+    bases.into_iter().rev().fold(B::zero(), |acc: B, b: B| acc * coeff + b)
+}
+
 /// (max_exp+1)-sized vec: 1, base, base^2,... ,base^{max_exp}
 pub fn powers<F: Field>(base: F, max_exp: usize) -> Vec<F> {
     let mut result = Vec::with_capacity(max_exp + 1);
@@ -122,6 +153,21 @@ pub fn powers<F: Field>(base: F, max_exp: usize) -> Vec<F> {
     result
 }
 
+pub fn eval_lc<C, B, CI, BI>(
+    coeffs: CI,
+    bases: BI,
+) -> B
+    where
+        CI: IntoIterator<Item=C>,
+        BI: IntoIterator<Item=B>,
+        C: Mul<B, Output=B>,
+        B: Sum<B>
+{
+    bases.into_iter().zip(coeffs)
+        .map(|(base, coeff)| coeff * base)
+        .sum::<B>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +176,11 @@ mod tests {
     use ark_std::{UniformRand, test_rng};
     use ark_std::convert::TryInto;
     use crate::tests::random_bits;
+
+    #[test]
+    pub fn test_eval_lc() {
+        assert_eq!(eval_lc(vec![1, 2, 3], vec![4, 5, 6]), 1 * 4 + 2 * 5 + 3 * 6);
+    }
 
     #[test]
     pub fn test_barycentric_eval() {
