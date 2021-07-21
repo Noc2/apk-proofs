@@ -81,14 +81,21 @@ fn verification(c: &mut Criterion) {
     use merlin::Transcript;
     use rand::{Rng, seq::SliceRandom};
     use std::convert::TryInto;
+    use std::time::Instant;
 
     let mut group = c.benchmark_group("verification");
 
     let rng = &mut test_rng();
-    let log_domain_size_range = 8..=16;
+    let log_domain_size_range = 8..=20;
 
-    for log_domain_size in log_domain_size_range {
+    let mut benches = vec![];
+
+    for log_domain_size in log_domain_size_range.step_by(2) {
+
+        let t_setup = Instant::now();
         let setup = Setup::generate(log_domain_size, rng);
+        let t_setup = t_setup.elapsed().as_millis();
+
         let keyset_size = rng.gen_range(1..=setup.max_keyset_size());
         let keyset_size = keyset_size.try_into().unwrap();
         let signer_set = SignerSet::random(keyset_size, rng);
@@ -96,6 +103,7 @@ fn verification(c: &mut Criterion) {
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
         let apk = bls::PublicKey::aggregate(signer_set.get_by_mask(&bitmask));
 
+        let t_init = Instant::now();
         let prover = Prover::new(
             setup.domain_size,
             setup.kzg_params.get_pk(),
@@ -103,9 +111,21 @@ fn verification(c: &mut Criterion) {
             signer_set.get_all(),
             Transcript::new(b"apk_proof"),
         );
+        let t_init =  t_init.elapsed().as_millis();
+
+        let t_basic = Instant::now();
         let proof_basic = prover.prove_simple(bitmask.clone());
+        let t_basic = t_init + t_basic.elapsed().as_millis();
+
+        let t_packed = Instant::now();
         let proof_packed = prover.prove_packed(bitmask.clone());
+        let t_packed = t_init + t_packed.elapsed().as_millis();
+
+        let t_counting = Instant::now();
         let proof_counting = prover.prove_counting(bitmask.clone());
+        let t_counting = t_init + t_counting.elapsed().as_millis();
+
+        benches.push((log_domain_size, t_setup, t_basic, t_packed, t_counting));
 
         let create_verifier = || {
             Verifier::new(
@@ -143,6 +163,8 @@ fn verification(c: &mut Criterion) {
             }),
         );
     }
+
+    println!("{:?}", benches);
 
     group.finish();
 }
